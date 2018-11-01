@@ -1,0 +1,6 @@
+---
+
+- name: restart SSSD
+  service: name=sssd state=restarted
+  become: true
+

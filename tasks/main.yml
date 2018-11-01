@@ -1,0 +1,100 @@
+---
+
+- name: install required packages (ldap, sasl2-gssapi, iconv, etc)
+  package: name={{ item }} state=present
+  with_items:
+    - openldap-clients
+    - libsasl2-plugin-gssapi
+    - iconv
+    - sshpass
+  become: true
+
+- name: prevent OpenLDAP tools from fiddling with reverse DNS
+  lineinfile:
+    dest: /etc/openldap/ldap.conf
+    line: 'sasl_nocanon yes'
+    state: present
+    create: yes
+  become: true
+
+- include: add_ssh_key_from_local_known_hosts.yml
+  vars:
+    remote_ssh_known_hosts: "/etc/openssh/ssh_known_hosts"
+  with_items: "{{ groups['samba_clients'] }}"
+
+- name: check if SSSD is installed
+  command: rpm -ql sssd
+  register: sssd_status_out
+  failed_when: false
+
+- set_fact:
+    sssd_installed: "{{ sssd_status_out.rc == 0 }}"
+
+- name: enable GPO processing in sssd.conf
+  lineinfile:
+    dest: /etc/sssd/sssd.conf
+    line: 'access_provider = ad'
+    insertafter: '^chpass_provider\\s*[=]\\s*ad\\s*$'
+    state: present
+  notify: restart SSSD
+  when: sssd_installed|bool
+  become: true
+
+- name: enable SSSD verbose debugging
+  lineinfile:
+    dest: /etc/sssd/sssd.conf
+    regexp: '^debug_level\\s*][=].*$'
+    line: 'debug_level = 50'
+    state: present
+  when: sssd_installed|bool
+  notify: restart SSSD
+  become: true
+
+- name: upgrade SSSD
+  package: name=sssd state=present update_cache=yes
+  when: sssd_installed|bool
+  notify: restart SSSD
+  become: true
+
+- name: run handlers (to restart SSSD)
+  meta: flush_handlers
+  when: sssd_installed|bool
+
+- name: flush SSSD cache
+  command: sss_cache -E
+  register: sss_cache_flush_out
+  when: sssd_installed|bool
+  failed_when: false
+  until: sss_cache_flush_out.rc == 0
+  delay: 10
+  retries: 3
+  become: true
+
+- set_fact:
+    samba_master_fqdn: "{{ samba_master_hostname }}.{{ samba_realm }}"
+
+- name: get administrator TGT
+  command: >
+    kinit administrator@{{ samba_realm|upper }}
+  args:
+    stdin: "{{ samba_admin_pass }}"
+
+- include: testuser.yml
+  when: samba_flavor == 'master'
+
+- include: OUs.yml
+  with_items: "{{ test_ous }}"
+  when: samba_flavor == 'master'
+
+- include: move2ou.yml
+  when: samba_flavor == 'master'
+  vars:
+    dest_OU: "{{ test_ous[idx|int].name }}"
+    item: "{{ groups['samba_clients'][idx|int] }}"
+  with_items: "{{ range(0, test_ous|length|int)|list }}"
+  loop_control:
+    loop_var: idx
+
+- include: gpoobj.yml
+  with_items: "{{ test_gpos }}"
+  when: samba_flavor == 'master'

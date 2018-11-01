@@ -1,0 +1,143 @@
+---
+
+- name: create GPO container
+  command: >
+    samba-tool gpo create "{{ item.display_name }}"
+    -H ldap://{{ master_dc }} -k yes
+  register: gpo_create_out
+  failed_when: false
+  vars:
+    master_dc: "{{ samba_master_hostname }}.{{ samba_realm }}"
+
+- name: find out GPO container uuid
+  shell: >
+    ldbsearch -H ldap://{{ master_dc }} -k yes
+    -b "CN=Policies,CN=System,{{ samba_realm|domain2dn }}"
+    '(&(objectClass=groupPolicyContainer)(displayName={{ item.display_name }}))'
+    name | awk '/^name:/ { print $2 }'
+  register: gpo_name_out
+  vars:
+    master_dc: "{{ samba_master_hostname }}.{{ samba_realm }}"
+
+- set_fact:
+    gpo_name: "{{ gpo_name_out.stdout.strip() }}"
+    sysvol: "/var/lib/samba/sysvol/{{ samba_realm }}"
+
+- set_fact:
+    gpo_gpttmpl: "{{ sysvol }}/Policies/{{ gpo_name }}/Machine/Microsoft/Windows NT/SecEdit/GptTmpl.inf"
+
+- fail:
+    msg: "failed to create GPO container {{ item.display_name }}"
+  when: gpo_name == ''
+
+- set_fact:
+    gpo_tmpfile: "/tmp/{{ gpo_gpttmpl.replace('/', '_') }}"
+    gpc_ldif_path: "/tmp/{{ gpo_name|replace(' ', '_') }}_gPCMachineExtensionNames.ldif"
+
+
+- name: check if gPCMachineExtensionNames attribute exists
+  shell: >
+    ldapsearch -Y GSSAPI -N -H ldap://{{ samba_master_fqdn }}
+    -b 'CN={{ gpo_name }},CN=Policies,CN=System,{{ samba_realm|domain2dn }}'
+    -LLL '(objectClass=groupPolicyContainer)' gPCMachineExtensionNames |
+    awk '/^gPCMachineExtensionNames:/ { print $1 }'
+  register: gPCMachineExtensionNames_search_out
+  failed_when: false
+
+- set_fact:
+    gPCMachineExtensionNames_exists: "{{ gPCMachineExtensionNames_search_out.stdout.strip() != '' }}"
+
+- name: set flag to disable user settings, part 1
+  template:
+    src: ./templates/gPCMachineExtensionNames.ldif.j2
+    dest: "{{ gpc_ldif_path }}"
+    mode: 0644
+
+- name: set flag to disable user settings, part 2
+  command: >
+    ldapmodify -N -Y GSSAPI -H ldap://{{ samba_master_fqdn }} -f "{{ gpc_ldif_path }}"
+
+- name: create GPO directories in sysvol
+  file:
+    path: "{{ gpo_gpttmpl|dirname }}"
+    state: directory
+    owner: root
+    group: root
+  become: true
+
+- name: create GPO payload
+  template:
+    src: "{{ item.template }}"
+    dest: "{{ gpo_tmpfile }}.pre"
+    mode: 0600
+
+- name: convert GPO payload to UTF-16
+  command: >
+    iconv -f UTF-8 -t UTF-16 -o "{{ gpo_tmpfile }}" "{{ gpo_tmpfile }}.pre"
+
+- name: put GPO into sysvol
+  copy:
+    src: "{{ gpo_tmpfile }}"
+    dest: "{{ gpo_gpttmpl }}"
+    remote_src: true
+  register: gpo_payload_copy
+  become: true
+
+- name: find the GPO version number
+  shell: >
+    ldapsearch -Y GSSAPI -N -H ldap://{{ samba_master_fqdn }} -LLL
+    -b "cn={{ gpo_name }},cn=Policies,cn=System,{{ samba_realm|domain2dn }}"
+    "(objectClass=groupPolicyContainer)" versionNumber |
+    awk '/^versionNumber:/ { print $2 }'
+  register: gpo_ldap_version_out
+
+- set_fact:
+    gpo_version_ldif: "/tmp/{{ gpo_name }}_version.ldif"
+    gpo_versionNumber: "{{ gpo_ldap_version_out.stdout|int }}"
+
+- name: bump the GPO version number in LDAP, make ldif
+  template:
+    src: templates/versionNumber.ldif.j2
+    dest: "{{ gpo_version_ldif }}"
+    mode: 0600
+  when: gpo_payload_copy is changed
+
+- name: bump the GPO version number in LDAP, apply ldif
+  command: >
+    ldapmodify -Y GSSAPI -N -H ldap://{{ samba_master_fqdn }} -f "{{ gpo_version_ldif }}"
+  when: gpo_payload_copy is changed
+
+- name: bump the GPO version number in GPT.INI
+  lineinfile:
+    path: "{{ sysvol }}/Policies/{{ gpo_name }}/GPT.INI"
+    regexp: "^Version="
+    line: "Version={{ gpo_versionNumber|int + 1 }}"
+  when: gpo_payload_copy is changed
+  become: true
+
+- name: fix GPO payload ACLs
+  command: samba-tool ntacl sysvolreset
+  become: true
+
+- name: check if the GPO is linked to the target OU
+  command: >
+    ldapsearch -Y GSSAPI -N -H ldap://{{ samba_master_fqdn }}
+    -b "OU={{ item.target_ou }},{{ samba_realm|domain2dn }}" -LLL
+    "(&(objectClass=organizationalUnit)(gPLink=[ldap://CN={{ gpo_name }},CN=Policies,CN=System,{{ samba_realm|domain2dn }};*]))"
+    gPLink
+  register: gpo_link_out
+  when: item.target_ou is defined
+  failed_when: false
+
+- set_fact:
+    gpo_link_exists: "{{ gpo_link_out.rc == 0 and gpo_link_out.stdout.strip() != '' }}"
+  when: item.target_ou is defined
+
+- name: link GPO to the target OU
+  command: >
+    samba-tool gpo setlink -H ldap://{{ samba_master_fqdn }} -k yes
+    "OU={{ item.target_ou }},{{ samba_realm|domain2dn }}"
+    "{{ gpo_name }}"
+  when:
+    - item.target_ou is defined
+    - not(gpo_link_exists|default(false)|bool)
