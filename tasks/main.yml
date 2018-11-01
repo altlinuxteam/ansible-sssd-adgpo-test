@@ -17,11 +17,6 @@
     create: yes
   become: true
 
-- include: add_ssh_key_from_local_known_hosts.yml
-  vars:
-    remote_ssh_known_hosts: "/etc/openssh/ssh_known_hosts"
-  with_items: "{{ groups['samba_clients'] }}"
-
 - name: check if SSSD is installed
   command: rpm -ql sssd
   register: sssd_status_out
@@ -80,21 +75,21 @@
     stdin: "{{ samba_admin_pass }}"
 
 - include: testuser.yml
-  when: samba_flavor == 'master'
+  when: samba_master_hostname == inventory_hostname_short
 
 - include: OUs.yml
   with_items: "{{ test_ous }}"
-  when: samba_flavor == 'master'
+  when: samba_master_hostname == inventory_hostname_short
 
 - include: move2ou.yml
-  when: samba_flavor == 'master'
+  when: samba_master_hostname == inventory_hostname_short
   vars:
     dest_OU: "{{ test_ous[idx|int].name }}"
-    item: "{{ groups['samba_clients'][idx|int] }}"
+    item: "{{ samba_clients[idx|int] }}"
   with_items: "{{ range(0, test_ous|length|int)|list }}"
   loop_control:
     loop_var: idx
 
 - include: gpoobj.yml
   with_items: "{{ test_gpos }}"
-  when: samba_flavor == 'master'
+  when: samba_master_hostname == inventory_hostname_short
