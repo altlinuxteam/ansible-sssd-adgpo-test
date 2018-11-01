@@ -85,7 +85,7 @@
   when: samba_master_hostname == inventory_hostname_short
   vars:
     dest_OU: "{{ test_ous[idx|int].name }}"
-    item: "{{ samba_clients[idx|int] }}"
+    item: "{{ (samba_clients | default(groups['samba_clients']))[idx|int] }}"
   with_items: "{{ range(0, test_ous|length|int)|list }}"
   loop_control:
     loop_var: idx
