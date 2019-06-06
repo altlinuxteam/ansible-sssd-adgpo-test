@@ -75,14 +75,14 @@
     stdin: "{{ samba_admin_pass }}"
 
 - include: testuser.yml
-  when: samba_master_hostname == inventory_hostname_short
+  when: samba_master_hostname == "{{inventory_hostname_short}}.{{samba_realm | lower}}"
 
 - include: OUs.yml
   with_items: "{{ test_ous }}"
-  when: samba_master_hostname == inventory_hostname_short
+  when: samba_master_hostname == "{{inventory_hostname_short}}.{{samba_realm | lower}}"
 
 - include: move2ou.yml
-  when: samba_master_hostname == inventory_hostname_short
+  when: samba_master_hostname == "{{inventory_hostname_short}}.{{samba_realm | lower}}"
   vars:
     dest_OU: "{{ test_ous[idx|int].name }}"
     item: "{{ (samba_clients | default(groups['samba_clients']))[idx|int] }}"
@@ -92,4 +92,4 @@
 
 - include: gpoobj.yml
   with_items: "{{ test_gpos }}"
-  when: samba_master_hostname == inventory_hostname_short
+  when: samba_master_hostname == "{{inventory_hostname_short}}.{{samba_realm | lower}}"
