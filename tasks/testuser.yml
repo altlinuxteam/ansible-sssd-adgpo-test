@@ -9,7 +9,7 @@
     samba-tool user list -H ldap://{{ master_dc }} -k yes
   register: user_list_out
   vars:
-    master_dc: "{{ samba_master_hostname }}.{{ samba_realm }}"
+    master_dc: "{{ samba_master_hostname }}"
 
 - set_fact:
     test_user_exists: "{{ test_user.name in user_list_out.stdout_lines }}"
@@ -19,7 +19,7 @@
     samba-tool user create "{{ test_user.name }}" "{{ test_user.password }}"
     -H ldap://{{ master_dc }} -k yes
   vars:
-    master_dc: "{{ samba_master_hostname }}.{{ samba_realm }}"
+    master_dc: "{{ samba_master_hostname }}"
   when: not(test_user_exists|bool)
 
 - name: find the test user SID, part 1
@@ -30,7 +30,7 @@
     awk '/^objectSid:/ { print $2 }'
   register: test_user_sid_out
   vars:
-    master_dc: "{{ samba_master_hostname }}.{{ samba_realm }}"
+    master_dc: "{{ samba_master_hostname }}"
 
 - set_fact:
     test_user_sid: "{{ test_user_sid_out.stdout.strip() }}"

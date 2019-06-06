@@ -7,7 +7,7 @@
   register: gpo_create_out
   failed_when: false
   vars:
-    master_dc: "{{ samba_master_hostname }}.{{ samba_realm }}"
+    master_dc: "{{ samba_master_hostname }}"
 
 - name: find out GPO container uuid
   shell: >
@@ -17,7 +17,7 @@
     name | awk '/^name:/ { print $2 }'
   register: gpo_name_out
   vars:
-    master_dc: "{{ samba_master_hostname }}.{{ samba_realm }}"
+    master_dc: "{{ samba_master_hostname }}"
 
 - set_fact:
     gpo_name: "{{ gpo_name_out.stdout.strip() }}"

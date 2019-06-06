@@ -8,7 +8,7 @@
   register: ou_guid_out
   failed_when: false
   vars:
-    master_dc: "{{ samba_master_hostname }}.{{ samba_realm }}"
+    master_dc: "{{ samba_master_hostname }}"
 
 - set_fact:
     ou_guid: "{{ ou_guid_out.stdout.strip() }}"
@@ -32,4 +32,4 @@
     ldbmodify -H ldap://{{ master_dc }} -k yes "{{ ou_ldif_path }}"
   when: not(ou_exists|bool)
   vars:
-    master_dc: "{{ samba_master_hostname }}.{{ samba_realm }}"
+    master_dc: "{{ samba_master_hostname }}"
