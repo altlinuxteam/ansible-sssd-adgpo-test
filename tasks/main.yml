@@ -74,15 +74,18 @@
   args:
     stdin: "{{ samba_admin_pass }}"
 
+- set_fact:
+    current_node: "{{inventory_hostname_short}}.{{samba_realm | lower}}"
+
 - include: testuser.yml
-  when: samba_master_hostname == "{{inventory_hostname_short}}.{{samba_realm | lower}}"
+  when: samba_master_hostname == current_node
 
 - include: OUs.yml
   with_items: "{{ test_ous }}"
-  when: samba_master_hostname == "{{inventory_hostname_short}}.{{samba_realm | lower}}"
+  when: samba_master_hostname == current_node
 
 - include: move2ou.yml
-  when: samba_master_hostname == "{{inventory_hostname_short}}.{{samba_realm | lower}}"
+  when: samba_master_hostname == current_node
   vars:
     dest_OU: "{{ test_ous[idx|int].name }}"
     item: "{{ (samba_clients | default(groups['samba_clients']))[idx|int] }}"
@@ -92,4 +95,4 @@
 
 - include: gpoobj.yml
   with_items: "{{ test_gpos }}"
-  when: samba_master_hostname == "{{inventory_hostname_short}}.{{samba_realm | lower}}"
+  when: samba_master_hostname == current_node
